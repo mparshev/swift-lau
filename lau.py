@@ -63,6 +63,7 @@ def read_any_batch(fname):
 				#proc_message(msg.decode())
 			elif fmt=='rje' and (not ch or ch==b'$'):
 				yield msg.decode()
+				msg=b''
 			else:
 				msg += ch
 				if fmt=='': fmt='rje'
