@@ -1,3 +1,7 @@
+#
+# LAU key calculation/verification for SWIFT
+#
+
 import glob
 import hmac
 import hashlib
@@ -7,6 +11,7 @@ import ntpath
 
 LAU_KEY = b'Abcdef1234567890Abcdef1234567890'
 
+# extract {S: block from message
 def split_message(msg):
 	m = re.search(r'{S:.*}', msg)
 	if m:
@@ -15,67 +20,60 @@ def split_message(msg):
 	else:
 		return msg, ''
 
+# find digest {MDG:
 def find_digest(msg):
-	m = re.search(r'{MDG:\w+}', msg)
-	if m: return m.group(0)
+	m = re.search(r'{MDG:(\w+)}', msg)
+	if m: return m.group(1)
 
+# calc digest value
 def sign(msg):
 	dig = hmac.new(LAU_KEY, msg=msg, digestmod=hashlib.sha256).digest()
 	return dig.hex().upper()
 
-def add_digest(s,dig):
-	if s:
-		return '{' + s[1:-1] + '{MDG:' + dig + '}}'
-	else:
-		return '{S:{MDG:' + dig + '}}'
-		
+# proceed message 		
 def proc_message(msg):
 	msg, s = split_message(msg)
 	dig = sign(msg.encode())
-	d = find_digest(s)
-	if d:
-		print(d, dig)
-		s = s.replace(d,'')
-	msg += add_digest(s, dig)
+	if s:
+		d = find_digest(s)
+		if d:
+			if d != dig : 
+				print('Warning! Incorrect digest.')
+			else:
+				print('Digest ok.')
+			msg += s.replace(d, dig)
+		else:
+			msg += '{' + s[1:-1] + '{MDG:' + dig + '}}'
+	else:
+		msg += '{S:{MDG:' + dig + '}}'
 	return msg.encode()
 
-def read_dos_pcc(fname):
+# read any batch (dos-pcc or rje)
+def read_any_batch(fname):
 	msg=b''
+	fmt=''
 	with open(fname,'rb') as fi:
 		while True:
 			ch = fi.read(1)
 			if ch==b'\x01':
 				msg=b''
-			elif ch==b'\x03':
+				if fmt=='': fmt='pcc'
+			elif fmt=='pcc' and ch==b'\x03':
 				yield msg.decode()
 				#proc_message(msg.decode())
-			else:
-				msg += ch
-			if not ch: break
-			
-def read_rje(fname):
-	msg=b''
-	with open(fname,'rb') as fi:
-		while True:
-			ch = fi.read(1)
-			if not ch or ch==b'$':
+			elif fmt=='rje' and (not ch or ch==b'$'):
 				yield msg.decode()
-				#proc_message(msg.decode())
-				msg = b''
 			else:
 				msg += ch
+				if fmt=='': fmt='rje'
 			if not ch: break
 
-def read_batch(fname,fmt='rje'):
-	if fmt == 'rje': 
-		return read_rje(fname)
-	if fmt == 'dos-pcc':
-		return read_dos_pcc(fname)
 
 for file in glob.glob('in\\*'):
 	with open('out/' + ntpath.basename(file), 'wb') as f:
 		delim = b''
-		for msg in read_batch(file):
+		for msg in read_any_batch(file):
 			f.write(delim)
 			f.write(proc_message(msg))
 			delim = b'$'
+
